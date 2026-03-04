@@ -1,8 +1,10 @@
 from pathlib import Path
+import secrets
 from flask import Flask, request, redirect, url_for, send_from_directory, abort, flash, render_template_string
 from werkzeug.utils import secure_filename
 
-UPLOAD_FOLDER = Path("uploads")
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_FOLDER = BASE_DIR / "uploads"
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
 app = Flask(__name__)
@@ -90,6 +92,21 @@ def safe_file_path(filename: str) -> Path:
     return path
 
 
+def unique_filename(filename: str) -> str:
+    """Avoid accidental overwrite by appending a token if name already exists."""
+    candidate = secure_filename(filename)
+    if not candidate:
+        candidate = f"upload-{secrets.token_hex(4)}"
+
+    path = UPLOAD_FOLDER / candidate
+    if not path.exists():
+        return candidate
+
+    stem = Path(candidate).stem
+    suffix = Path(candidate).suffix
+    return f"{stem}-{secrets.token_hex(4)}{suffix}"
+
+
 @app.get("/")
 def index():
     files = sorted(UPLOAD_FOLDER.iterdir(), key=lambda p: p.name.lower())
@@ -103,13 +120,15 @@ def upload_file():
         flash("Please choose a file first.")
         return redirect(url_for("index"))
 
-    filename = secure_filename(uploaded.filename)
-    if not filename:
-        flash("Invalid filename.")
-        return redirect(url_for("index"))
+    filename = unique_filename(uploaded.filename)
 
     destination = UPLOAD_FOLDER / filename
-    uploaded.save(destination)
+    try:
+        uploaded.save(destination)
+    except OSError:
+        flash("Upload failed: unable to write file to the server.")
+        return redirect(url_for("index"))
+
     flash(f"Uploaded: {filename}")
     return redirect(url_for("index"))
 
